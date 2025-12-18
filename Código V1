@@ -1,19 +1,19 @@
 #include <WiFi.h>
 #include <WebServer.h>
 
-// --- 1. CONFIGURACIÓN DE RED ---
+// 1) CONFIGURACIÓN DE RED
 const char* ssid = "A55 de Dylan";
 const char* password = "12345678";
 WebServer server(80);
 
-// --- 2. MAPEO DE HARDWARE (Pines ESP32) ---
-const int PUMP_PIN = 27;         // Salida a Relé Bomba
-const int LED_ROJO_PIN = 13;     // Estado: Seco
-const int LED_AMARILLO_PIN = 12; // Estado: Exceso
-const int LED_VERDE_PIN = 14;    // Estado: Ok
-const int SENSOR_PIN = 34;       // Entrada ADC1 (Humedad)
+// 2) CONFIGURACIÓN DE PINES
+const int PUMP_PIN = 27;         
+const int LED_ROJO_PIN = 13;     
+const int LED_AMARILLO_PIN = 12; 
+const int LED_VERDE_PIN = 14;    
+const int SENSOR_PIN = 34;       
 
-// --- 3. UMBRALES Y VARIABLES ---
+// 3) UMBRALES Y VARIABLES
 const int UMBRAL_SECO = 30;     
 const int UMBRAL_HUMEDO = 65;   
 
@@ -21,11 +21,10 @@ int valorAnalogico = 0;
 int humedadPorcentaje = 0;    
 bool estadoRiegoManual = false; 
 
-// --- 4. FUNCIONES DE LECTURA Y CONTROL ---
+// 4) FUNCIONES DE LECTURA Y CONTROL
 
 void leerSensorHumedad() {
     valorAnalogico = analogRead(SENSOR_PIN); 
-    // Mapeo ajustado a 12 bits (4095 es aire/seco, ~1500 es agua/húmedo)
     humedadPorcentaje = map(valorAnalogico, 4095, 1500, 0, 100);
     humedadPorcentaje = constrain(humedadPorcentaje, 0, 100);
     
@@ -33,35 +32,34 @@ void leerSensorHumedad() {
 }
 
 void actualizarActuadores() {
-    // Si el riego manual está activo, ignoramos la lógica automática
-    if (estadoRiegoManual) {
-        digitalWrite(PUMP_PIN, LOW); // Encendido (Relé suele activar en LOW)
-        digitalWrite(LED_ROJO_PIN, HIGH);
-        digitalWrite(LED_AMARILLO_PIN, LOW);
-        digitalWrite(LED_VERDE_PIN, LOW);
-        return;
-    }
-
-    // Lógica Automática
+    // 1) LÓGICA DE LOS LEDS
     digitalWrite(LED_ROJO_PIN, LOW);
     digitalWrite(LED_AMARILLO_PIN, LOW);
     digitalWrite(LED_VERDE_PIN, LOW);
 
     if (humedadPorcentaje < UMBRAL_SECO) {
-        digitalWrite(PUMP_PIN, LOW);   // Riega
-        digitalWrite(LED_ROJO_PIN, HIGH);
+        digitalWrite(LED_ROJO_PIN, HIGH);    
     } 
     else if (humedadPorcentaje >= UMBRAL_HUMEDO) {
-        digitalWrite(PUMP_PIN, HIGH);  // No riega
-        digitalWrite(LED_AMARILLO_PIN, HIGH);
+        digitalWrite(LED_AMARILLO_PIN, HIGH); 
     } 
     else {
-        digitalWrite(PUMP_PIN, HIGH);  // No riega
-        digitalWrite(LED_VERDE_PIN, HIGH);
+        digitalWrite(LED_VERDE_PIN, HIGH);    
+    }
+
+    // 2) LÓGICA DE LA BOMBA
+    if (estadoRiegoManual) {
+        digitalWrite(PUMP_PIN, LOW); 
+    } 
+    else {
+        if (humedadPorcentaje < UMBRAL_SECO) {
+            digitalWrite(PUMP_PIN, LOW);  
+        } else {
+            digitalWrite(PUMP_PIN, HIGH);
+        }
     }
 }
-
-// --- 5. INTERFAZ WEB ---
+// 5) INTERFAZ WEB
 
 String buildHtmlPage() {
     String html = "<!DOCTYPE html><html><head><meta charset='UTF-8'>";
@@ -78,7 +76,6 @@ String buildHtmlPage() {
     html += "<div class='val'>" + String(humedadPorcentaje) + "%</div><br>";
     
     html += "<h3>Control Manual</h3>";
-    // Corregido con el cast de (String) para evitar el error de concatenación
     html += "<a href='/toggleRiego' class='btn " + String(estadoRiegoManual ? "btn-on" : "btn-off") + "'>";
     html += (String)(estadoRiegoManual ? "DETENER RIEGO" : "INICIAR RIEGO") + "</a>";
     
@@ -95,7 +92,7 @@ void handleToggleRiego() {
     server.send(303);
 }
 
-// --- 6. SETUP Y LOOP ---
+// 6) SETUP Y LOOP
 
 void setup() {
     Serial.begin(115200);
@@ -105,7 +102,7 @@ void setup() {
     pinMode(LED_AMARILLO_PIN, OUTPUT);
     pinMode(LED_VERDE_PIN, OUTPUT);
     
-    digitalWrite(PUMP_PIN, HIGH); // Apagado inicial
+    digitalWrite(PUMP_PIN, HIGH);
 
     WiFi.begin(ssid, password);
     while (WiFi.status() != WL_CONNECTED) { delay(500); Serial.print("."); }
