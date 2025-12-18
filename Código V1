@@ -1,0 +1,128 @@
+#include <WiFi.h>
+#include <WebServer.h>
+
+// --- 1. CONFIGURACIÓN DE RED ---
+const char* ssid = "A55 de Dylan";
+const char* password = "12345678";
+WebServer server(80);
+
+// --- 2. MAPEO DE HARDWARE (Pines ESP32) ---
+const int PUMP_PIN = 27;         // Salida a Relé Bomba
+const int LED_ROJO_PIN = 13;     // Estado: Seco
+const int LED_AMARILLO_PIN = 12; // Estado: Exceso
+const int LED_VERDE_PIN = 14;    // Estado: Ok
+const int SENSOR_PIN = 34;       // Entrada ADC1 (Humedad)
+
+// --- 3. UMBRALES Y VARIABLES ---
+const int UMBRAL_SECO = 30;     
+const int UMBRAL_HUMEDO = 65;   
+
+int valorAnalogico = 0;       
+int humedadPorcentaje = 0;    
+bool estadoRiegoManual = false; 
+
+// --- 4. FUNCIONES DE LECTURA Y CONTROL ---
+
+void leerSensorHumedad() {
+    valorAnalogico = analogRead(SENSOR_PIN); 
+    // Mapeo ajustado a 12 bits (4095 es aire/seco, ~1500 es agua/húmedo)
+    humedadPorcentaje = map(valorAnalogico, 4095, 1500, 0, 100);
+    humedadPorcentaje = constrain(humedadPorcentaje, 0, 100);
+    
+    Serial.printf("Lectura ADC: %d | Humedad: %d%%\n", valorAnalogico, humedadPorcentaje);
+}
+
+void actualizarActuadores() {
+    // Si el riego manual está activo, ignoramos la lógica automática
+    if (estadoRiegoManual) {
+        digitalWrite(PUMP_PIN, LOW); // Encendido (Relé suele activar en LOW)
+        digitalWrite(LED_ROJO_PIN, HIGH);
+        digitalWrite(LED_AMARILLO_PIN, LOW);
+        digitalWrite(LED_VERDE_PIN, LOW);
+        return;
+    }
+
+    // Lógica Automática
+    digitalWrite(LED_ROJO_PIN, LOW);
+    digitalWrite(LED_AMARILLO_PIN, LOW);
+    digitalWrite(LED_VERDE_PIN, LOW);
+
+    if (humedadPorcentaje < UMBRAL_SECO) {
+        digitalWrite(PUMP_PIN, LOW);   // Riega
+        digitalWrite(LED_ROJO_PIN, HIGH);
+    } 
+    else if (humedadPorcentaje >= UMBRAL_HUMEDO) {
+        digitalWrite(PUMP_PIN, HIGH);  // No riega
+        digitalWrite(LED_AMARILLO_PIN, HIGH);
+    } 
+    else {
+        digitalWrite(PUMP_PIN, HIGH);  // No riega
+        digitalWrite(LED_VERDE_PIN, HIGH);
+    }
+}
+
+// --- 5. INTERFAZ WEB ---
+
+String buildHtmlPage() {
+    String html = "<!DOCTYPE html><html><head><meta charset='UTF-8'>";
+    html += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
+    html += "<meta http-equiv='refresh' content='3'>"; 
+    html += "<style>body{text-align:center; font-family:sans-serif; background:#f4f7f6; color:#333;}";
+    html += ".card{background:white; margin:20px auto; padding:25px; border-radius:15px; max-width:350px; box-shadow:0 10px 20px rgba(0,0,0,0.1);}";
+    html += ".val{font-size:45px; font-weight:bold; color:#2c3e50;}";
+    html += ".btn{padding:15px 30px; border:none; border-radius:8px; color:white; cursor:pointer; text-decoration:none; display:inline-block; font-size:18px;}";
+    html += ".btn-on{background:#e74c3c;} .btn-off{background:#2ecc71;}</style></head><body>";
+    
+    html += "<div class='card'><h1>Sistema de Riego</h1>";
+    html += "<h2>Humedad actual</h2>";
+    html += "<div class='val'>" + String(humedadPorcentaje) + "%</div><br>";
+    
+    html += "<h3>Control Manual</h3>";
+    // Corregido con el cast de (String) para evitar el error de concatenación
+    html += "<a href='/toggleRiego' class='btn " + String(estadoRiegoManual ? "btn-on" : "btn-off") + "'>";
+    html += (String)(estadoRiegoManual ? "DETENER RIEGO" : "INICIAR RIEGO") + "</a>";
+    
+    html += "<p>Estado: <strong>" + String(estadoRiegoManual ? "Manual" : "Automático") + "</strong></p>";
+    html += "</div></body></html>";
+    return html;
+}
+
+void handleRoot() { server.send(200, "text/html", buildHtmlPage()); }
+
+void handleToggleRiego() {
+    estadoRiegoManual = !estadoRiegoManual;
+    server.sendHeader("Location", "/");
+    server.send(303);
+}
+
+// --- 6. SETUP Y LOOP ---
+
+void setup() {
+    Serial.begin(115200);
+    
+    pinMode(PUMP_PIN, OUTPUT);
+    pinMode(LED_ROJO_PIN, OUTPUT);
+    pinMode(LED_AMARILLO_PIN, OUTPUT);
+    pinMode(LED_VERDE_PIN, OUTPUT);
+    
+    digitalWrite(PUMP_PIN, HIGH); // Apagado inicial
+
+    WiFi.begin(ssid, password);
+    while (WiFi.status() != WL_CONNECTED) { delay(500); Serial.print("."); }
+    Serial.println("\nConectado. IP: " + WiFi.localIP().toString());
+
+    server.on("/", handleRoot);
+    server.on("/toggleRiego", handleToggleRiego);
+    server.begin();
+}
+
+void loop() {
+    server.handleClient();
+    
+    static unsigned long t = 0;
+    if (millis() - t >= 2000) {
+        leerSensorHumedad();
+        actualizarActuadores();
+        t = millis();
+    }
+}
