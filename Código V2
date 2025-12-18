@@ -1,0 +1,145 @@
+#include <WiFi.h>
+#include <WebServer.h>
+
+// --- CONFIGURACIÓN DE RED ---
+const char* ssid = "A55 de Dylan";
+const char* password = "12345678";
+WebServer server(80);
+
+// --- MAPEO DE HARDWARE ---
+const int PUMP_PIN = 27;         
+const int LED_ROJO_PIN = 13;     
+const int LED_AMARILLO_PIN = 12; 
+const int LED_VERDE_PIN = 14;    
+const int SENSOR_PIN = 34;       
+
+// --- UMBRALES ---
+const int UMBRAL_SECO = 30;     
+const int UMBRAL_HUMEDO = 65;   
+
+int humedadPorcentaje = 0;    
+bool estadoRiegoManual = false; 
+bool bombaActiva = false;       
+bool estadoBlink = LOW;         // Para el parpadeo de LEDs y Web
+
+// --- FUNCIONES DE LECTURA ---
+
+void leerSensorHumedad() {
+    int valorAnalogico = analogRead(SENSOR_PIN); 
+    // Mapeo para ESP32 (4095 seco - 1500 sumergido)
+    humedadPorcentaje = map(valorAnalogico, 4095, 1500, 0, 100);
+    humedadPorcentaje = constrain(humedadPorcentaje, 0, 100);
+}
+
+void gestionarSistema() {
+    leerSensorHumedad();
+
+    // 1. Determinar estado de la bomba
+    // Se activa si es automático y está seco, O si el usuario lo pide manualmente
+    if (estadoRiegoManual || humedadPorcentaje < UMBRAL_SECO) {
+        bombaActiva = true;
+        digitalWrite(PUMP_PIN, LOW); 
+    } else {
+        bombaActiva = false;
+        digitalWrite(PUMP_PIN, HIGH); 
+    }
+
+    // 2. Control de LEDs con Advertencia
+    digitalWrite(LED_ROJO_PIN, LOW);
+    digitalWrite(LED_VERDE_PIN, LOW);
+    digitalWrite(LED_AMARILLO_PIN, LOW);
+
+    if (humedadPorcentaje < UMBRAL_SECO) {
+        // CONDICIÓN SECO: LED Rojo Fijo (Es normal que la bomba esté prendida aquí)
+        digitalWrite(LED_ROJO_PIN, HIGH);
+    } 
+    else if (humedadPorcentaje >= UMBRAL_HUMEDO) {
+        // CONDICIÓN SOBREHUMEDAD: LED Amarillo
+        // Si la bomba está activa aquí, es una advertencia -> PARPADEO
+        if (bombaActiva) digitalWrite(LED_AMARILLO_PIN, estadoBlink);
+        else digitalWrite(LED_AMARILLO_PIN, HIGH);
+    } 
+    else {
+        // CONDICIÓN ÓPTIMA: LED Verde
+        // Si la bomba está activa aquí, es una advertencia -> PARPADEO
+        if (bombaActiva) digitalWrite(LED_VERDE_PIN, estadoBlink);
+        else digitalWrite(LED_VERDE_PIN, HIGH);
+    }
+}
+
+// --- INTERFAZ WEB ---
+
+String buildHtmlPage() {
+    // Determinar color del texto de humedad
+    String colorHumedad = "#2ecc71"; // Verde por defecto
+    if (humedadPorcentaje < UMBRAL_SECO) colorHumedad = "#e74c3c"; // Rojo
+    else if (humedadPorcentaje >= UMBRAL_HUMEDO) colorHumedad = "#f1c40f"; // Amarillo
+
+    // Determinar si el porcentaje debe parpadear (solo si bomba activa en Verde o Amarillo)
+    bool debeParpadearWeb = (bombaActiva && humedadPorcentaje >= UMBRAL_SECO);
+
+    String html = "<!DOCTYPE html><html><head><meta charset='UTF-8'>";
+    html += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
+    html += "<meta http-equiv='refresh' content='1'>"; // Refresco rápido para ver el parpadeo
+    html += "<style>body{text-align:center; font-family:sans-serif; background:#f4f7f6;}";
+    html += ".card{background:white; margin:20px auto; padding:25px; border-radius:15px; max-width:350px; box-shadow:0 5px 15px rgba(0,0,0,0.1);}";
+    
+    // Estilo dinámico para el valor de humedad
+    html += ".val{font-size:60px; font-weight:bold; color:" + colorHumedad + ";";
+    if (debeParpadearWeb && estadoBlink == LOW) html += "visibility:hidden;"; // Efecto de parpadeo
+    html += "}";
+    
+    html += ".btn{padding:15px; border-radius:10px; color:white; border:none; cursor:pointer; font-size:16px;}";
+    html += "</style></head><body>";
+    
+    html += "<div class='card'><h1>Smart Garden</h1>";
+    html += "<h2>Estado del Suelo</h2>";
+    html += "<div class='val'>" + String(humedadPorcentaje) + "%</div>";
+    
+    String msg = (humedadPorcentaje < UMBRAL_SECO) ? "¡Suelo Seco!" : 
+                 (humedadPorcentaje >= UMBRAL_HUMEDO) ? "Sobrehumedad" : "Humedad Óptima";
+    html += "<p style='color:" + colorHumedad + "; font-weight:bold;'>" + msg + "</p>";
+
+    html += "<hr><h3>Control de Riego</h3>";
+    html += "<a href='/toggleRiego'><button class='btn' style='background:" + String(estadoRiegoManual ? "#e74c3c" : "#2ecc71") + ";'>";
+    html += (String)(estadoRiegoManual ? "DETENER RIEGO MANUAL" : "INICIAR RIEGO MANUAL") + "</button></a>";
+    
+    if (bombaActiva && humedadPorcentaje >= UMBRAL_SECO) {
+        html += "<p style='color:orange;'><strong>⚠️ ADVERTENCIA: Riego forzado</strong></p>";
+    }
+    
+    html += "</div></body></html>";
+    return html;
+}
+
+void handleRoot() { server.send(200, "text/html", buildHtmlPage()); }
+void handleToggleRiego() { estadoRiegoManual = !estadoRiegoManual; server.sendHeader("Location", "/"); server.send(303); }
+
+// --- SETUP Y LOOP ---
+
+void setup() {
+    Serial.begin(115200);
+    pinMode(PUMP_PIN, OUTPUT);
+    pinMode(LED_ROJO_PIN, OUTPUT);
+    pinMode(LED_AMARILLO_PIN, OUTPUT);
+    pinMode(LED_VERDE_PIN, OUTPUT);
+    
+    digitalWrite(PUMP_PIN, HIGH); 
+    WiFi.begin(ssid, password);
+    while (WiFi.status() != WL_CONNECTED) { delay(500); Serial.print("."); }
+    
+    server.on("/", handleRoot);
+    server.on("/toggleRiego", handleToggleRiego);
+    server.begin();
+}
+
+void loop() {
+    server.handleClient();
+    
+    static unsigned long lastTick = 0;
+    if (millis() - lastTick >= 500) {
+        estadoBlink = !estadoBlink; 
+        gestionarSistema();
+        lastTick = millis();
+    }
+}
