@@ -13,11 +13,17 @@ const int LED_AMARILLO_PIN = 12;
 const int LED_VERDE_PIN = 14;    
 const int SENSOR_PIN = 34;       
 
-// 3) UMBRALES Y VARIABLES
+// 3) PARÁMETROS Y UMBRALES
+const int ADC_SECO = 4095;
+const int ADC_HUMEDO = 1500;
+const int PORCENTAJE_MIN = 0;
+const int PORCENTAJE_MAX = 100;
+
 const int UMBRAL_SECO = 30;     
 const int UMBRAL_HUMEDO = 65;   
+const int INTERVALO_MS = 2000;
 
-int valorAnalogico = 0;       
+int valorAnalogico = 0;        
 int humedadPorcentaje = 0;    
 bool estadoRiegoManual = false; 
 
@@ -25,14 +31,13 @@ bool estadoRiegoManual = false;
 
 void leerSensorHumedad() {
     valorAnalogico = analogRead(SENSOR_PIN); 
-    humedadPorcentaje = map(valorAnalogico, 4095, 1500, 0, 100);
-    humedadPorcentaje = constrain(humedadPorcentaje, 0, 100);
+    humedadPorcentaje = map(valorAnalogico, ADC_SECO, ADC_HUMEDO, PORCENTAJE_MIN, PORCENTAJE_MAX);
+    humedadPorcentaje = constrain(humedadPorcentaje, PORCENTAJE_MIN, PORCENTAJE_MAX);
     
     Serial.printf("Lectura ADC: %d | Humedad: %d%%\n", valorAnalogico, humedadPorcentaje);
 }
 
 void actualizarActuadores() {
-    // 1) LÓGICA DE LOS LEDS
     digitalWrite(LED_ROJO_PIN, LOW);
     digitalWrite(LED_AMARILLO_PIN, LOW);
     digitalWrite(LED_VERDE_PIN, LOW);
@@ -47,7 +52,6 @@ void actualizarActuadores() {
         digitalWrite(LED_VERDE_PIN, HIGH);    
     }
 
-    // 2) LÓGICA DE LA BOMBA
     if (estadoRiegoManual) {
         digitalWrite(PUMP_PIN, LOW); 
     } 
@@ -59,6 +63,7 @@ void actualizarActuadores() {
         }
     }
 }
+
 // 5) INTERFAZ WEB
 
 String buildHtmlPage() {
@@ -117,7 +122,7 @@ void loop() {
     server.handleClient();
     
     static unsigned long t = 0;
-    if (millis() - t >= 2000) {
+    if (millis() - t >= INTERVALO_MS) {
         leerSensorHumedad();
         actualizarActuadores();
         t = millis();
