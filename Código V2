@@ -18,7 +18,7 @@ const int UMBRAL_SECO = 30;
 const int UMBRAL_HUMEDO = 65;   
 
 int humedadPorcentaje = 0;    
-bool bloqueoEmergencia = false; 
+bool estadoManualForzado = false; 
 bool bombaActiva = false;       
 bool estadoBlink = LOW;         
 
@@ -36,7 +36,8 @@ void gestionarSistema() {
     leerSensorHumedad();
 
     // 1. Determinar estado de la bomba
-    if (humedadPorcentaje < UMBRAL_SECO && !bloqueoEmergencia) {
+    // La bomba se activa si el suelo está seco O si tú activaste el modo manual
+    if (humedadPorcentaje < UMBRAL_SECO || estadoManualForzado) {
         bombaActiva = true;
         digitalWrite(PUMP_PIN, LOW); 
     } else {
@@ -50,14 +51,17 @@ void gestionarSistema() {
     digitalWrite(LED_AMARILLO_PIN, LOW);
 
     if (humedadPorcentaje < UMBRAL_SECO) {
-        if (bloqueoEmergencia) digitalWrite(LED_ROJO_PIN, estadoBlink);
-        else digitalWrite(LED_ROJO_PIN, HIGH);
+        digitalWrite(LED_ROJO_PIN, HIGH);
     } 
     else if (humedadPorcentaje >= UMBRAL_HUMEDO) {
-        digitalWrite(LED_AMARILLO_PIN, HIGH);
+        // Si la bomba está encendida por manual en sobrehumedad, parpadea
+        if (bombaActiva) digitalWrite(LED_AMARILLO_PIN, estadoBlink);
+        else digitalWrite(LED_AMARILLO_PIN, HIGH);
     } 
     else {
-        digitalWrite(LED_VERDE_PIN, HIGH);
+        // Si la bomba está encendida por manual en óptimo, parpadea
+        if (bombaActiva) digitalWrite(LED_VERDE_PIN, estadoBlink);
+        else digitalWrite(LED_VERDE_PIN, HIGH);
     }
 }
 
@@ -85,14 +89,18 @@ String buildHtmlPage() {
                  (humedadPorcentaje >= UMBRAL_HUMEDO) ? "Sobrehumedad" : "Humedad Óptima";
     html += "<p style='color:" + colorHumedad + "; font-weight:bold;'>" + msg + "</p>";
 
-    html += "<hr><h3>Control de Seguridad</h3>";
-    html += "<a href='/toggleRiego'><button class='btn' style='background:" + String(bloqueoEmergencia ? "#2ecc71" : "#e74c3c") + ";'>";
-    html += (String)(bloqueoEmergencia ? "ACTIVAR MODO AUTOMÁTICO" : "BLOQUEAR BOMBA (STOP)") + "</button></a>";
+    html += "<hr><h3>Control de Bomba</h3>";
     
-    if (bloqueoEmergencia) {
-        html += "<p style='color:red;'><strong>BOMBA BLOQUEADA MANUALMENTE</strong></p>";
+    // El botón cambia de color y texto según si tú activaste el riego manual
+    html += "<a href='/toggleRiego'><button class='btn' style='background:" + String(estadoManualForzado ? "#e74c3c" : "#3498db") + ";'>";
+    html += (String)(estadoManualForzado ? "DESACTIVAR FORZADO" : "FORZAR ENCENDIDO") + "</button></a>";
+    
+    if (estadoManualForzado) {
+        html += "<p style='color:#e74c3c;'><strong>BOMBA FORZADA POR USUARIO</strong></p>";
     } else if (bombaActiva) {
-        html += "<p style='color:blue;'><strong>Regando automáticamente...</strong></p>";
+        html += "<p style='color:#2ecc71;'><strong>Riego Automático Activo</strong></p>";
+    } else {
+        html += "<p style='color:gray;'>Sistema en espera...</p>";
     }
     
     html += "</div></body></html>";
@@ -100,7 +108,13 @@ String buildHtmlPage() {
 }
 
 void handleRoot() { server.send(200, "text/html", buildHtmlPage()); }
-void handleToggleRiego() { bloqueoEmergencia = !bloqueoEmergencia; server.sendHeader("Location", "/"); server.send(303); }
+
+// Esta función permite encender/apagar manualmente sin romper la lógica del sensor
+void handleToggleRiego() { 
+    estadoManualForzado = !estadoManualForzado; 
+    server.sendHeader("Location", "/"); 
+    server.send(303); 
+}
 
 // --- SETUP Y LOOP ---
 
