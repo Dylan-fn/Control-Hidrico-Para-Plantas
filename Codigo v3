@@ -1,0 +1,94 @@
+/*
+   PROYECTO: SISTEMA DE RIEGO AUTOMATIZADO
+   PLACA: ARDUINO UNO
+   AUTOR: Robles
+*/
+
+// 1) CONFIGURACIÓN DE PINES
+const int PUMP_PIN = 7;           // Pin Digital para el Relé
+const int LED_ROJO_PIN = 2;      // Indicador Seco / ErroR
+const int LED_AMARILLO_PIN = 3;  // Indicador Saturado
+const int LED_VERDE_PIN = 4;     // Indicador Óptimo
+const int SENSOR_PIN = A1;       // Pin Analógico para YL-69
+
+// 2) PARÁMETROS Y UMBRALES (Calibración Arduino Uno 0-1023)
+const int ADC_SECO = 655;       // Valor máximo en aire
+const int ADC_HUMEDO = 300;      // Valor estimado en agua
+
+const int PORCENTAJE_MIN = 0;
+const int PORCENTAJE_MAX = 100;
+
+const int UMBRAL_SECO = 30;      // Debajo de esto, riega
+const int UMBRAL_HUMEDO = 65;    // Encima de esto, alerta exceso
+const int INTERVALO_MS = 1000;   // Lectura cada 1 segundo
+
+int valorAnalogico = 0;
+int humedadPorcentaje = 0;
+
+// 3) SETUP
+void setup() {
+    Serial.begin(9600);
+
+    // Configuración de salidas
+    pinMode(PUMP_PIN, OUTPUT);
+    pinMode(LED_ROJO_PIN, OUTPUT);
+    pinMode(LED_AMARILLO_PIN, OUTPUT);
+    pinMode(LED_VERDE_PIN, OUTPUT);
+
+    // Estado inicial: Bomba APAGADA
+    digitalWrite(PUMP_PIN, HIGH); 
+    
+    Serial.println("---SISTEMA INICIADO (SIN SENSOR DE NIVEL)---");
+}
+
+// 4) FUNCIONES
+
+void leerSensorHumedad() {
+    valorAnalogico = analogRead(SENSOR_PIN);
+    
+    // Mapeo: 1023 es seco (0%), 400 es húmedo (100%)
+    humedadPorcentaje = map(valorAnalogico, ADC_SECO, ADC_HUMEDO, PORCENTAJE_MIN, PORCENTAJE_MAX);
+    humedadPorcentaje = constrain(humedadPorcentaje, PORCENTAJE_MIN, PORCENTAJE_MAX);
+
+    Serial.print("ADC: "); Serial.print(valorAnalogico);
+    Serial.print(" | Humedad: "); Serial.print(humedadPorcentaje); Serial.println("%");
+}
+
+void controlarSistema() {
+    // Reseteamos LEDs
+    digitalWrite(LED_ROJO_PIN, LOW);
+    digitalWrite(LED_AMARILLO_PIN, LOW);
+    digitalWrite(LED_VERDE_PIN, LOW);
+
+    // --- LÓGICA DE INDICADORES ---
+    if (humedadPorcentaje < UMBRAL_SECO) {
+        digitalWrite(LED_ROJO_PIN, HIGH);    // Rojo: Necesita agua
+    } 
+    else if (humedadPorcentaje >= UMBRAL_HUMEDO) {
+        digitalWrite(LED_AMARILLO_PIN, HIGH); // Amarillo: Exceso
+    } 
+    else {
+        digitalWrite(LED_VERDE_PIN, HIGH);    // Verde: Estado optimo
+    }
+
+    // --- LÓGICA DE BOMBA ---
+    if (humedadPorcentaje < UMBRAL_SECO) {
+        // RIEGO ACTIVO
+        Serial.println("ESTADO: REGANDO...");
+        digitalWrite(PUMP_PIN, LOW); // LOW enciende el relé comúnmente
+    } else {
+        // RIEGO INACTIVO
+        digitalWrite(PUMP_PIN, HIGH); // HIGH apaga el relé
+    }
+}
+
+// 5) LOOP PRINCIPAL
+void loop() {
+    static unsigned long tiempoAnterior = 0;
+    
+    if (millis() - tiempoAnterior >= INTERVALO_MS) {
+        leerSensorHumedad();
+        controlarSistema();
+        tiempoAnterior = millis();
+    }
+}
